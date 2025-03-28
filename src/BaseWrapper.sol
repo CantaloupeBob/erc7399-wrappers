@@ -26,6 +26,7 @@ abstract contract BaseWrapper is IERC7399 {
     using SafeERC20 for IERC20;
     using TransientBytes for bytes;
     using TransientBytes for bytes32;
+
     struct Data {
         address loanReceiver;
         address initiator;
@@ -121,11 +122,7 @@ abstract contract BaseWrapper is IERC7399 {
 
     /// @dev Approve the repayment of the loan to the provider if needed.
     /// Override it if the provider can receive the funds directly and you want to avoid the if condition
-    function _approveRepayment(address asset, uint256 amount, uint256 fee) internal virtual {
-        if (_repayTo() == address(this)) {
-            IERC20(asset).forceApprove(msg.sender, amount + fee);
-        }
-    }
+    function _approveRepayment(address asset, uint256 amount, uint256 fee) internal virtual { }
 
     /// @dev Where should the end client send the funds to repay the loan
     /// Override it if the provider can receive the funds directly
