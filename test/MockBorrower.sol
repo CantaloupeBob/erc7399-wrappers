@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import "../src/interfaces/IERC7399.sol";
 import "src/BaseWrapper.sol";
+import { IBalancerWrapperCrvUsd } from "../src/balancer/interfaces/IBalancerWrapperCrvUsd.sol";
 import { GasSnapshot } from "forge-gas-snapshot/GasSnapshot.sol";
 
 contract LoanReceiver {
@@ -68,7 +69,7 @@ contract MockBorrower is GasSnapshot {
         address asset,
         uint256 amount,
         uint256 fee,
-        bytes calldata data
+        bytes calldata
     )
         external
         returns (bytes memory)
@@ -83,10 +84,10 @@ contract MockBorrower is GasSnapshot {
         loanReceiver.retrieve(asset);
         flashBalance = IERC20(asset).balanceOf(address(this));
 
-        (address intermediaryAsset, uint256 intermediaryAmount) = abi.decode(data, (address, uint256));
+        (address token, uint256 balFlAmount) = IBalancerWrapperCrvUsd(msg.sender).getExtBalancerRepayment();
 
         IERC20(asset).safeTransfer(paymentReceiver, amount + fee);
-        IERC20(intermediaryAsset).safeTransfer(paymentReceiver, intermediaryAmount);
+        IERC20(token).safeTransfer(paymentReceiver, balFlAmount);
 
         return abi.encode(ERC3156PP_CALLBACK_SUCCESS);
     }

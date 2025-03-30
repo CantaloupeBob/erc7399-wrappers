@@ -45,7 +45,8 @@ contract BalancerWrapperCrvUsdTest is Test {
     function test_flashLoan_weth_balancerWrapperCrvUsd() external {
         uint256 loan = 1e8; // 1 weth
         uint256 fee = wrapper.flashFee(weth, loan);
-        bytes memory initiatorData = abi.encode(wethCrvUsdController);
+        bytes memory dummyCbData = abi.encode(1, true);
+        bytes memory initiatorData = abi.encode(dummyCbData);
         bytes memory result = borrower.flashBorrow(weth, loan, initiatorData, borrower.onFlashLoan);
         (bytes32 callbackReturn) = abi.decode(result, (bytes32));
 
@@ -61,8 +62,8 @@ contract BalancerWrapperCrvUsdTest is Test {
     function test_flashLoan_crv_usd_balancerWrapperCrvUsd() external {
         uint256 loan = 10_000e18; // 10K CrvUsd
         uint256 fee = wrapper.flashFee(crvUsd, loan);
-
-        bytes memory initiatorData = abi.encode(wethCrvUsdController);
+        bytes memory dummyCbData = abi.encode(1, true);
+        bytes memory initiatorData = abi.encode(wethCrvUsdController, dummyCbData);
         deal(IController(wethCrvUsdController).collateral_token(), address(borrower), 1e18);
         bytes memory result =
             borrower.flashBorrow(crvUsd, loan, initiatorData, borrower.onFlashLoanWithCustomAmountCrvUsdWrapper);
@@ -72,8 +73,8 @@ contract BalancerWrapperCrvUsdTest is Test {
         assertEq(vm.load(address(wrapper), bytes32(uint256(0))), "");
         assertEq(borrower.flashInitiator(), address(borrower));
         assertEq(address(borrower.flashAsset()), crvUsd);
-        assertEq(borrower.flashAmount(), loan + 0);
-        assertEq(borrower.flashBalance(), loan + 0);
+        assertEq(borrower.flashAmount(), loan + fee);
+        assertEq(borrower.flashBalance(), loan + fee);
         assertEq(borrower.flashAmount(), loan + fee);
         assertEq(borrower.flashBalance(), loan + fee);
         assertEq(borrower.flashFee(), fee);

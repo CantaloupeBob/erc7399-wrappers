@@ -5,6 +5,7 @@ pragma solidity ^0.8.19;
 import { IFlashLoanRecipient } from "../balancer/interfaces/IFlashLoanRecipient.sol";
 import { IFlashLoaner } from "../balancer/interfaces/IFlashLoaner.sol";
 import { IController } from "./interfaces/IController.sol";
+import { IBalancerWrapperCrvUsd } from "./interfaces/IBalancerWrapperCrvUsd.sol";
 
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -14,16 +15,15 @@ import { WAD } from "../utils/constants.sol";
 
 import { BaseWrapper, IERC7399, IERC20 } from "../BaseWrapper.sol";
 
-import { console } from "forge-std/console.sol";
-
-contract BalancerWrapperCrvUsd is BaseWrapper, IFlashLoanRecipient {
+// TODO: Decide what to do about the flashFee and the approval coming form the BaseWrapper
+contract BalancerWrapperCrvUsd is BaseWrapper, IBalancerWrapperCrvUsd, IFlashLoanRecipient {
     using SafeERC20 for IERC20;
     using Arrays for uint256;
     using Arrays for address;
 
-    error LlamaLendArbitrumWrapper__NotBalancer();
-    error LlamaLendArbitrumWrapper__CorruptedData();
-    error LlamaLendArbitrumWrapper__UnsupportedCurrency();
+    error BalancerWrapperCrvUsd__NotBalancer();
+    error BalancerWrapperCrvUsd__CorruptedData();
+    error BalancerWrapperCrvUsd__UnsupportedCurrency();
 
     struct CrvUsdParams {
         bool isCrvUsd;
@@ -32,8 +32,8 @@ contract BalancerWrapperCrvUsd is BaseWrapper, IFlashLoanRecipient {
     }
 
     IFlashLoaner public constant BALANCER_VAULT = IFlashLoaner(0xBA12222222228d8Ba445958a75a0704d566BF2C8);
-    uint256 public constant MIN_DEPOSIT_BANDS = 4;
     address constant CRV_USD = 0x498Bf2B1e120FeD3ad3D42EA2165E9b73f99C1e5;
+    uint256 public constant MIN_DEPOSIT_BANDS = 4;
 
     bytes32 private flashLoanDataHash;
 
@@ -46,7 +46,7 @@ contract BalancerWrapperCrvUsd is BaseWrapper, IFlashLoanRecipient {
     function flashFee(address asset, uint256 amount) external view returns (uint256) {
         if (asset == CRV_USD) return 0;
         uint256 max = _maxFlashLoan(asset);
-        if (max == 0) revert LlamaLendArbitrumWrapper__UnsupportedCurrency();
+        if (max == 0) revert BalancerWrapperCrvUsd__UnsupportedCurrency();
         return _flashFee(amount);
     }
 
@@ -60,16 +60,18 @@ contract BalancerWrapperCrvUsd is BaseWrapper, IFlashLoanRecipient {
         external
         override
     {
-        if (msg.sender != address(BALANCER_VAULT)) revert LlamaLendArbitrumWrapper__NotBalancer();
-        if (keccak256(paramsData) != flashLoanDataHash) revert LlamaLendArbitrumWrapper__CorruptedData();
-
+        if (msg.sender != address(BALANCER_VAULT)) revert BalancerWrapperCrvUsd__NotBalancer();
+        if (keccak256(paramsData) != flashLoanDataHash) revert BalancerWrapperCrvUsd__CorruptedData();
         delete flashLoanDataHash;
+
+        /// @dev controller will be `address(0)` if the asset is not crvUSD
         (address controller, address asset, uint256 amount, bytes memory subParamsData) =
             _handleCBData(assets[0], amounts[0], paramsData);
 
         _bridgeToCallback(asset, amount, fees[0], subParamsData);
         _handleCrvUsdLoan(controller, asset, amount);
-
+        // If Balancer ever charges a fee & we are flashLoaning crvUSD, we can't repay it with the flash loan, so this
+        // wrapper becomes useless
         IERC20(assets[0]).safeTransfer(msg.sender, amounts[0] + fees[0]);
     }
 
@@ -118,6 +120,7 @@ contract BalancerWrapperCrvUsd is BaseWrapper, IFlashLoanRecipient {
 
         paramsData =
             abi.encode(CrvUsdParams({ isCrvUsd: isCrvUsd, crvUsdAmount: crvUsdAmount, subParamsData: paramsData }));
+
         return (balancerFlToken, balancerFlAmount, paramsData);
     }
 
@@ -146,9 +149,7 @@ contract BalancerWrapperCrvUsd is BaseWrapper, IFlashLoanRecipient {
             /// Balancer, so we pass the price delta along with the callback
             uint256 loanCollateral = iController.user_state(address(this))[0];
             if (loanCollateral < amount) {
-                Data memory subParams = abi.decode(flParams.subParamsData, (Data));
-                subParams.initiatorData = abi.encode(asset, amount - loanCollateral, subParams.initiatorData);
-                flParams.subParamsData = abi.encode(subParams);
+                _storeExtraBalancerRepayment(collateralToken, amount - loanCollateral);
             }
             asset = CRV_USD;
             amount = flParams.crvUsdAmount;
@@ -161,6 +162,24 @@ contract BalancerWrapperCrvUsd is BaseWrapper, IFlashLoanRecipient {
             IERC20(CRV_USD).safeIncreaseAllowance(controller, amount);
             uint256 maxRepayId = type(uint256).max;
             IController(controller).repay(maxRepayId);
+        }
+    }
+
+    function _repayTo() internal view override returns (address) {
+        return address(this);
+    }
+
+    function _storeExtraBalancerRepayment(address _token, uint256 _amount) private {
+        assembly {
+            tstore(0, _token)
+            tstore(1, _amount)
+        }
+    }
+
+    function getExtBalancerRepayment() external view returns (address token_, uint256 amount_) {
+        assembly {
+            token_ := tload(0)
+            amount_ := tload(1)
         }
     }
 }
