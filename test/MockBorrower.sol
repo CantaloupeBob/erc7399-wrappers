@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 import "../src/interfaces/IERC7399.sol";
 import "src/BaseWrapper.sol";
+import { IBalancerWrapperCrvUsd } from "../src/balancer/interfaces/IBalancerWrapperCrvUsd.sol";
 import { GasSnapshot } from "forge-gas-snapshot/GasSnapshot.sol";
 
 contract LoanReceiver {
@@ -58,6 +59,35 @@ contract MockBorrower is GasSnapshot {
         loanReceiver.retrieve(asset);
         flashBalance = IERC20(asset).balanceOf(address(this));
         IERC20(asset).safeTransfer(paymentReceiver, amount + fee);
+
+        return abi.encode(ERC3156PP_CALLBACK_SUCCESS);
+    }
+
+    function onFlashLoanWithCustomAmountCrvUsdWrapper(
+        address initiator,
+        address paymentReceiver,
+        address asset,
+        uint256 amount,
+        uint256 fee,
+        bytes calldata
+    )
+        external
+        returns (bytes memory)
+    {
+        require(msg.sender == address(lender), "MockBorrower: Untrusted lender");
+        require(initiator == address(this), "MockBorrower: External loan initiator");
+
+        flashInitiator = initiator;
+        flashAsset = asset;
+        flashAmount = amount;
+        flashFee = fee;
+        loanReceiver.retrieve(asset);
+        flashBalance = IERC20(asset).balanceOf(address(this));
+
+        (address token, uint256 balFlAmount) = IBalancerWrapperCrvUsd(msg.sender).getExtBalancerRepayment();
+
+        IERC20(asset).safeTransfer(paymentReceiver, amount + fee);
+        IERC20(token).safeTransfer(paymentReceiver, balFlAmount);
 
         return abi.encode(ERC3156PP_CALLBACK_SUCCESS);
     }
@@ -154,14 +184,26 @@ contract MockBorrower is GasSnapshot {
         return "";
     }
 
-    function flashBorrow(address asset, uint256 amount) public returns (bytes memory) {
-        return lender.flash(address(loanReceiver), asset, amount, "", this.onFlashLoan);
+    function flashBorrow(
+        address asset,
+        uint256 amount,
+        bytes memory data,
+        function(address, address, address, uint256, uint256, bytes memory) external returns (bytes memory) callback
+    )
+        public
+        returns (bytes memory)
+    {
+        return lender.flash(address(loanReceiver), asset, amount, data, callback);
     }
 
     function flashBorrowNoPointers(address asset, uint256 amount) public returns (bytes memory) {
         return BaseWrapper(address(lender)).flash(
             address(loanReceiver), asset, amount, "", address(this), this.onFlashLoan.selector
         );
+    }
+
+    function flashBorrow(address asset, uint256 amount) public returns (bytes memory) {
+        return lender.flash(address(loanReceiver), asset, amount, "", this.onFlashLoan);
     }
 
     function flashBorrowAndSteal(address asset, uint256 amount) public returns (bytes memory) {
